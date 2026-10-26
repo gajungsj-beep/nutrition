@@ -162,15 +162,15 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
     setError(null);
     setLoadingStage("학생 활동 자료 분석 및 핵심 수학 역량 추출 중...");
 
+    const timer1 = setTimeout(() => {
+      setLoadingStage("성취 수준 및 교육과정 성취기준 매핑 중...");
+    }, 800);
+
+    const timer2 = setTimeout(() => {
+      setLoadingStage("NEIS 1,500바이트 규정 및 문체 교정 중...");
+    }, 1600);
+
     try {
-      setTimeout(() => {
-        setLoadingStage("성취 수준 및 교육과정 성취기준 매핑 중...");
-      }, 900);
-
-      setTimeout(() => {
-        setLoadingStage("NEIS 1,500바이트 규정 및 문체 교정 중...");
-      }, 1900);
-
       const response = await fetch("/api/generate-record", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -186,6 +186,9 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
         }),
       });
 
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+
       if (!response.ok) {
         const errJson = await response.json();
         throw new Error(errJson.error || "세특 생성 요청에 실패했습니다.");
@@ -197,7 +200,9 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
       setCurrentText(data.primaryRecord);
     } catch (err: any) {
       console.error(err);
-      setError(err?.message || "문장 생성 중 오류가 발생했습니다.");
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setError(err?.message || "문장 생성 중 오류가 발생했습니다. 다시 시도해주세요.");
     } finally {
       setIsLoading(false);
       setLoadingStage("");
