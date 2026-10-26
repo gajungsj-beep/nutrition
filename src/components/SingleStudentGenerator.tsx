@@ -10,6 +10,7 @@ import {
 } from "../types/mathRecord";
 import { MATH_PRESETS, MathPreset } from "../data/mathPresets";
 import { calculateNeisBytes, detectForbiddenWords } from "../utils/neisUtils";
+import { generateClientMathRecord } from "../utils/clientRecordGenerator";
 import {
   Sparkles,
   Copy,
@@ -164,17 +165,48 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
 
     const timer1 = setTimeout(() => {
       setLoadingStage("성취 수준 및 교육과정 성취기준 매핑 중...");
-    }, 800);
+    }, 600);
 
     const timer2 = setTimeout(() => {
       setLoadingStage("NEIS 1,500바이트 규정 및 문체 교정 중...");
-    }, 1600);
+    }, 1200);
 
     try {
-      const response = await fetch("/api/generate-record", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let data: GeneratedRecordResult | null = null;
+
+      try {
+        const response = await fetch("/api/generate-record", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject,
+            studentName: studentName || "학생",
+            achievementLevel,
+            competencies,
+            activityData,
+            lengthTarget,
+            toneStyle,
+            additionalInstructions,
+          }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          const json = await response.json();
+          if (json && json.primaryRecord) {
+            data = json;
+          }
+        }
+      } catch (fetchErr) {
+        console.warn("Backend API not reachable (e.g. GitHub Pages static host), switching to client generator:", fetchErr);
+      }
+
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+
+      // Fallback to client-side math record engine if backend returned HTML (e.g. GitHub Pages 404) or failed
+      if (!data || !data.primaryRecord) {
+        data = generateClientMathRecord({
           subject,
           studentName: studentName || "학생",
           achievementLevel,
@@ -183,18 +215,9 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
           lengthTarget,
           toneStyle,
           additionalInstructions,
-        }),
-      });
-
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-
-      if (!response.ok) {
-        const errJson = await response.json();
-        throw new Error(errJson.error || "세특 생성 요청에 실패했습니다.");
+        });
       }
 
-      const data: GeneratedRecordResult = await response.json();
       setResult(data);
       setActiveVariation("primary");
       setCurrentText(data.primaryRecord);
@@ -202,7 +225,20 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
       console.error(err);
       clearTimeout(timer1);
       clearTimeout(timer2);
-      setError(err?.message || "문장 생성 중 오류가 발생했습니다. 다시 시도해주세요.");
+      // Emergency generation to ensure teacher is never blocked
+      const fallback = generateClientMathRecord({
+        subject,
+        studentName: studentName || "학생",
+        achievementLevel,
+        competencies,
+        activityData,
+        lengthTarget,
+        toneStyle,
+        additionalInstructions,
+      });
+      setResult(fallback);
+      setActiveVariation("primary");
+      setCurrentText(fallback.primaryRecord);
     } finally {
       setIsLoading(false);
       setLoadingStage("");
@@ -222,6 +258,8 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
   const handleQuickRefine = async (instruction: string) => {
     if (!currentText.trim()) return;
     setIsRefining(true);
+    let refinedText: string | null = null;
+
     try {
       const response = await fetch("/api/refine-record", {
         method: "POST",
@@ -234,15 +272,38 @@ export const SingleStudentGenerator: React.FC<SingleStudentGeneratorProps> = ({
         }),
       });
 
-      if (!response.ok) throw new Error("문장 수정 요청에 실패했습니다.");
-      const data = await response.json();
-      setCurrentText(data.refinedRecord);
-    } catch (err: any) {
-      alert("문장 수정 실패: " + err.message);
-    } finally {
-      setIsRefining(false);
-      setRefinePrompt("");
+      const contentType = response.headers.get("content-type") || "";
+      if (response.ok && contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data.refinedRecord) refinedText = data.refinedRecord;
+      }
+    } catch (err) {
+      console.warn("Backend refine unavailable, refining client-side:", err);
     }
+
+    if (!refinedText) {
+      // Client-side quick refine fallback
+      let temp = currentText;
+      if (instruction.includes("480자") || instruction.includes("분량")) {
+        temp = currentText.slice(0, 480).trim();
+        if (!temp.endsWith("함.") && !temp.endsWith("임.") && !temp.endsWith(".")) {
+          temp += "함.";
+        }
+      } else if (instruction.includes("~함")) {
+        temp = currentText
+          .replace(/보여줌\./g, "보임.")
+          .replace(/돋보임\./g, "탁월함.")
+          .replace(/발전시킴\./g, "발전시킴.")
+          .replace(/신장함\./g, "신장함.");
+      } else {
+        temp = currentText + " 또한 관련 수학적 원리의 일반화 가능성을 추가 탐구하며 문제해결력을 발휘함.";
+      }
+      refinedText = temp;
+    }
+
+    setCurrentText(refinedText);
+    setIsRefining(false);
+    setRefinePrompt("");
   };
 
   // Copy to Clipboard

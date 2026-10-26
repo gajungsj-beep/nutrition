@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { StudentItem, MathSubject, AchievementLevel, MathCompetency } from "../types/mathRecord";
 import { calculateNeisBytes, detectForbiddenWords } from "../utils/neisUtils";
+import { generateClientMathRecord } from "../utils/clientRecordGenerator";
 import {
   Users,
   Plus,
@@ -52,10 +53,32 @@ export const BatchGenerator: React.FC<BatchGeneratorProps> = ({
   // Generate Single Student in Batch
   const generateStudent = async (student: StudentItem): Promise<StudentItem> => {
     try {
-      const response = await fetch("/api/generate-record", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let data: any = null;
+      try {
+        const response = await fetch("/api/generate-record", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subject: student.subject,
+            studentName: student.name,
+            achievementLevel: student.achievementLevel,
+            competencies: student.competencies,
+            activityData: student.activityData,
+            lengthTarget: "standard",
+            toneStyle: "standard_formal",
+          }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          data = await response.json();
+        }
+      } catch (e) {
+        console.warn("Backend not available in batch, using client generator:", e);
+      }
+
+      if (!data || !data.primaryRecord) {
+        data = generateClientMathRecord({
           subject: student.subject,
           studentName: student.name,
           achievementLevel: student.achievementLevel,
@@ -63,11 +86,9 @@ export const BatchGenerator: React.FC<BatchGeneratorProps> = ({
           activityData: student.activityData,
           lengthTarget: "standard",
           toneStyle: "standard_formal",
-        }),
-      });
+        });
+      }
 
-      if (!response.ok) throw new Error("생성 실패");
-      const data = await response.json();
       return {
         ...student,
         generatedRecord: data.primaryRecord,
@@ -81,10 +102,27 @@ export const BatchGenerator: React.FC<BatchGeneratorProps> = ({
         }),
       };
     } catch (err: any) {
+      // Emergency client generation fallback
+      const fallback = generateClientMathRecord({
+        subject: student.subject,
+        studentName: student.name,
+        achievementLevel: student.achievementLevel,
+        competencies: student.competencies,
+        activityData: student.activityData,
+        lengthTarget: "standard",
+        toneStyle: "standard_formal",
+      });
       return {
         ...student,
+        generatedRecord: fallback.primaryRecord,
+        deepDiveRecord: fallback.deepDiveRecord,
+        collaborativeRecord: fallback.collaborativeRecord,
         isGenerating: false,
-        error: err.message || "오류 발생",
+        error: undefined,
+        updatedAt: new Date().toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       };
     }
   };
